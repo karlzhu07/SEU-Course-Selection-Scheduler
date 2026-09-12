@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>Course Planner Fixture</title>
+    <style>
+      body { margin: 0; padding: 24px; font-family: sans-serif; }
+      .course-wrap { position: relative; width: 454px; }
+      .course-card {
+        width: 420px;
+        padding: 16px;
+        border: 1px solid #ccd7e5;
+        border-radius: 8px;
+      }
+      .recommend-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        background: rgba(255, 255, 255, 0.01);
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-end;
+        padding: 12px;
+      }
+      .page-choice {
+        padding: 6px 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="xsxkapp">
+      <div class="course-wrap">
+        <article class="course-card">
+          <h3>线性代数</h3>
+          <p>课程号：B0000010</p>
+          <p>教学班：线性代数01班</p>
+          <p>教师：张老师</p>
+          <p>教室：教一-101</p>
+          <p>1-16周 星期一 第1-2节</p>
+          <p>学分：3</p>
+        </article>
+        <div class="recommend-overlay">
+          <button type="button" class="page-choice">选择</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__plannerErrors = [];
+      window.addEventListener('error', (event) => {
+        window.__plannerErrors.push(event.error?.stack || event.message);
+      });
+      window.batch = {
+        code: 'fixture-batch',
+        schoolTerm: 'fixture-term'
+      };
+    </script>
+    <script src="../seu-course-planner.user.js"></script>
+    <script>
+      setTimeout(() => {
+        const host = document.querySelector('.seu-course-planner-host');
+        const addButton = document.querySelector('.seu-planner-add');
+        const overlay = document.querySelector('.recommend-overlay');
+        if (addButton && overlay) {
+          const rect = addButton.getBoundingClientRect();
+          overlay.dispatchEvent(
+            new PointerEvent('pointerdown', {
+              bubbles: true,
+              cancelable: true,
+              pointerType: 'mouse',
+              button: 0,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2
+            })
+          );
+        }
+
+        setTimeout(() => {
+          const root = host?.shadowRoot;
+          const planner = root?.querySelector('.planner');
+          const dragGrip = root?.querySelector('.drag-grip');
+          if (planner && dragGrip) {
+            const rect = planner.getBoundingClientRect();
+            dragGrip.dispatchEvent(
+              new PointerEvent('pointerdown', {
+                bubbles: true,
+                cancelable: true,
+                pointerType: 'mouse',
+                button: 0,
+                clientX: rect.left + 4,
+                clientY: rect.top + 12
+              })
+            );
+            window.dispatchEvent(
+              new PointerEvent('pointermove', {
+                bubbles: true,
+                pointerType: 'mouse',
+                clientX: 220,
+                clientY: 160
+              })
+            );
+            window.dispatchEvent(
+              new PointerEvent('pointerup', {
+                bubbles: true,
+                pointerType: 'mouse',
+                clientX: 220,
+                clientY: 160
+              })
+            );
+          }
+          const card = document.querySelector('.course-card');
+          const cardRect = card?.getBoundingClientRect();
+          const core = window.__SEU_COURSE_PLANNER__?.core;
+          const parsedCard = core?.normalizeCourse(
+            {
+              courseName: '线性代数',
+              rawText: card?.innerText || ''
+            },
+            {
+              rawText: card?.innerText || '',
+              source: 'fixture'
+            }
+          );
+          const result = {
+            mounted: Boolean(root?.querySelector('.planner')),
+            hasShadow: Boolean(root),
+            shadowHtmlLength: root?.innerHTML.length || 0,
+            apiPresent: Boolean(window.__SEU_COURSE_PLANNER__),
+            dragged: Boolean(planner?.style.left && planner?.style.top),
+            buttonCount: document.querySelectorAll('.seu-planner-add').length,
+            meetingCount: root?.querySelectorAll('.meeting').length || 0,
+            plannedRows:
+              root?.querySelectorAll('[data-action="remove-planned"]').length || 0,
+            cardRect: cardRect
+              ? {
+                  width: cardRect.width,
+                  height: cardRect.height,
+                  display: getComputedStyle(card).display
+                }
+              : null,
+            cardText: card?.innerText || '',
+            cardMatchesSelector: card?.matches(
+              '[class*="course"], [class*="Course"]'
+            ) || false,
+            parsedMeetingCount: parsedCard?.meetings.length || 0,
+            errors: window.__plannerErrors
+          };
+          const output = document.createElement('pre');
+          output.id = 'test-result';
+          output.textContent = JSON.stringify(result);
+          document.body.appendChild(output);
+          document.body.dataset.plannerTest = 'done';
+        }, 400);
+      }, 800);
+    </script>
+  </body>
+</html>
