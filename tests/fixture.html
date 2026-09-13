@@ -36,7 +36,8 @@
           <p>教学班：线性代数01班</p>
           <p>教师：张老师</p>
           <p>教室：教一-101</p>
-          <p>1-16周 星期一 第1-2节</p>
+          <p>1-10周 星期一 第11-13节</p>
+          <p>11周 星期一 第11-12节</p>
           <p>学分：3</p>
         </article>
         <div class="recommend-overlay">
@@ -129,6 +130,8 @@
             dragged: Boolean(planner?.style.left && planner?.style.top),
             buttonCount: document.querySelectorAll('.seu-planner-add').length,
             meetingCount: root?.querySelectorAll('.meeting').length || 0,
+            scheduleRows:
+              root?.querySelectorAll('.meeting-schedules span').length || 0,
             plannedRows:
               root?.querySelectorAll('[data-action="remove-planned"]').length || 0,
             cardRect: cardRect
