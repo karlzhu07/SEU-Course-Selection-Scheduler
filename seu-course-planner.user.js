@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         东南大学选课预排助手
 // @namespace    https://github.com/local/seu-course-planner
-// @version      0.1.5
+// @version      0.1.6
 // @description  在东南大学选课页显示预选课程周课表，并在本机检测时间冲突。
 // @match        *://newxk.urp.seu.edu.cn/xsxk/*
 // @run-at       document-start
@@ -490,6 +490,36 @@
     );
   }
 
+  function mergeDisplayMeetings(meetings) {
+    const sorted = dedupeMeetings(meetings);
+    const groups = [];
+    for (const meeting of sorted) {
+      const group = groups.find(
+        (candidate) =>
+          candidate.day === meeting.day &&
+          meeting.startPeriod <= candidate.endPeriod + 1,
+      );
+      if (group) {
+        group.endPeriod = Math.max(group.endPeriod, meeting.endPeriod);
+        group.meetings.push(meeting);
+      } else {
+        groups.push({
+          day: meeting.day,
+          startPeriod: meeting.startPeriod,
+          endPeriod: meeting.endPeriod,
+          meetings: [meeting],
+        });
+      }
+    }
+
+    return groups.map((group) => ({
+      day: group.day,
+      startPeriod: group.startPeriod,
+      endPeriod: group.endPeriod,
+      schedules: dedupeMeetings(group.meetings),
+    }));
+  }
+
   function isTruthySelected(value) {
     if (value === true) return true;
     if (value === false || value == null) return false;
@@ -723,6 +753,7 @@
     coursesConflict,
     detectConflictIds,
     dedupeMeetings,
+    mergeDisplayMeetings,
     normalizeText,
     stringValue,
   };
@@ -1607,23 +1638,44 @@
       return `${day} ${periods} ${weeks}`;
     }
 
-    function formatCourseMeta(course) {
-      return [
-        course.type,
-        course.credits ? `${course.credits} 学分` : '',
-        course.teacher,
-        course.room,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+    function formatMeetingPeriods(meeting) {
+      return meeting.startPeriod === meeting.endPeriod
+        ? `第${meeting.startPeriod}节`
+        : `第${meeting.startPeriod}-${meeting.endPeriod}节`;
+    }
+
+    function formatMeetingCompact(meeting) {
+      const weeks = meeting.weeksKnown
+        ? meeting.weeksText || `第${meeting.weeks.join('、')}周`
+        : '周次未标明';
+      return `${weeks} ${formatMeetingPeriods(meeting)}`;
     }
 
     function buildDayItems(courses) {
       const dayItems = new Map(DAYS.map((day) => [day.value, []]));
       courses.forEach((course) => {
+        const meetingsByDay = new Map();
         course.meetings.forEach((meeting) => {
-          if (!core.meetingAppliesToWeek(meeting, state.weekMode)) return;
-          dayItems.get(meeting.day).push({ course, meeting });
+          if (!meetingsByDay.has(meeting.day)) meetingsByDay.set(meeting.day, []);
+          meetingsByDay.get(meeting.day).push(meeting);
+        });
+
+        meetingsByDay.forEach((meetings, day) => {
+          core.mergeDisplayMeetings(meetings).forEach((displayMeeting) => {
+            const schedules = displayMeeting.schedules.filter((meeting) =>
+              core.meetingAppliesToWeek(meeting, state.weekMode),
+            );
+            if (schedules.length === 0) return;
+            dayItems.get(day).push({
+              course,
+              meeting: {
+                day,
+                startPeriod: displayMeeting.startPeriod,
+                endPeriod: displayMeeting.endPeriod,
+              },
+              schedules,
+            });
+          });
         });
       });
 
@@ -1684,14 +1736,25 @@
       const conflict = conflictIds.has(course.id);
       const status = course.official ? '已选' : '预选';
       const stale = course.stale ? ' · 数据失效' : '';
+      const schedules = item.schedules || [meeting];
       const tooltip = [
         `${course.courseName}（${status}${stale}）`,
-        course.className,
-        formatCourseMeta(course),
-        formatMeeting(meeting),
+        course.teacher || '教师未标明',
+        ...schedules.map((schedule) => formatMeeting(schedule)),
       ]
         .filter(Boolean)
         .join('\n');
+      const scheduleHtml =
+        `
+          <div class="meeting-schedules">
+            ${schedules
+              .map(
+                (schedule) =>
+                  `<span>${escapeHtml(formatMeetingCompact(schedule))}</span>`,
+              )
+              .join('')}
+          </div>
+        `;
 
       return `
         <div
@@ -1709,7 +1772,8 @@
           data-course-id="${encodeURIComponent(course.id)}"
         >
           <strong>${escapeHtml(course.courseName)}</strong>
-          <span>${escapeHtml(course.room || course.teacher || '')}</span>
+          <span class="meeting-teacher">${escapeHtml(course.teacher || '教师未标明')}</span>
+          ${scheduleHtml}
           ${conflict ? '<em>冲突</em>' : ''}
         </div>
       `;
@@ -2352,6 +2416,16 @@
           line-height: 1.2;
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+        .meeting-schedules {
+          margin-top: 2px;
+        }
+        .meeting-schedules span {
+          margin-top: 1px;
+          font-size: 8px;
+          line-height: 1.15;
+          overflow-wrap: anywhere;
+          white-space: normal;
         }
         .meeting em {
           position: absolute;
