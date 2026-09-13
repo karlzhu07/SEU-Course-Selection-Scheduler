@@ -9,6 +9,7 @@ const {
   extractCourses,
   meetingsConflict,
   detectConflictIds,
+  mergeDisplayMeetings,
 } = require('../seu-course-planner.user.js');
 
 assert.deepEqual(
@@ -159,5 +160,28 @@ const extracted = extractCourses({
 });
 assert.equal(extracted.length, 1);
 assert.equal(extracted[0].courseName, '高等数学');
+
+const mergedDisplayMeetings = mergeDisplayMeetings([
+  {
+    day: 4,
+    startPeriod: 11,
+    endPeriod: 13,
+    weeks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    weeksKnown: true,
+    weeksText: '1-10周',
+  },
+  {
+    day: 4,
+    startPeriod: 11,
+    endPeriod: 12,
+    weeks: [11],
+    weeksKnown: true,
+    weeksText: '11周',
+  },
+]);
+assert.equal(mergedDisplayMeetings.length, 1);
+assert.equal(mergedDisplayMeetings[0].startPeriod, 11);
+assert.equal(mergedDisplayMeetings[0].endPeriod, 13);
+assert.equal(mergedDisplayMeetings[0].schedules.length, 2);
 
 console.log('Core tests passed.');
