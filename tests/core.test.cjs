@@ -10,6 +10,8 @@ const {
   meetingsConflict,
   detectConflictIds,
   mergeDisplayMeetings,
+  sourceLooksOfficial,
+  applyCourseSnapshot,
 } = require('../seu-course-planner.user.js');
 
 assert.deepEqual(
@@ -183,5 +185,40 @@ assert.equal(mergedDisplayMeetings.length, 1);
 assert.equal(mergedDisplayMeetings[0].startPeriod, 11);
 assert.equal(mergedDisplayMeetings[0].endPeriod, 13);
 assert.equal(mergedDisplayMeetings[0].schedules.length, 2);
+
+assert.equal(
+  sourceLooksOfficial('/xsxk/course/query?resultType=all'),
+  false,
+);
+assert.equal(
+  sourceLooksOfficial('/xsxk/elective/myCourseList'),
+  true,
+);
+assert.equal(
+  sourceLooksOfficial('/xsxk/elective/my-course'),
+  true,
+);
+assert.equal(
+  sourceLooksOfficial('/xsxk/elective/selected-courses'),
+  true,
+);
+
+const snapshotCourses = [
+  { id: 'A-1', courseCode: 'A', stale: true },
+  { id: 'B-1', courseCode: 'B', stale: false },
+  { id: 'C-1', courseCode: 'C', stale: false },
+];
+assert.deepEqual(
+  applyCourseSnapshot(snapshotCourses, [
+    { id: 'A-1', courseCode: 'A' },
+    { id: 'B-2', courseCode: 'B' },
+  ]),
+  [
+    { id: 'A-1', courseCode: 'A', stale: false },
+    { id: 'B-1', courseCode: 'B', stale: true },
+    { id: 'C-1', courseCode: 'C', stale: false },
+  ],
+);
+assert.strictEqual(applyCourseSnapshot(snapshotCourses, null), snapshotCourses);
 
 console.log('Core tests passed.');

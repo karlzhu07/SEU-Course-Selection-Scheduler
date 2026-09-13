@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         东南大学选课预排助手
 // @namespace    https://github.com/local/seu-course-planner
-// @version      0.1.6
+// @version      0.1.7
 // @description  在东南大学选课页显示预选课程周课表，并在本机检测时间冲突。
 // @match        *://newxk.urp.seu.edu.cn/xsxk/*
 // @run-at       document-start
@@ -737,6 +737,40 @@
     return ids;
   }
 
+  function sourceLooksOfficial(source) {
+    const tokens = normalizeText(source)
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+    return tokens.some((token, index) => {
+      if (
+        /^(?:selected(?:course)?(?:list|s)?|mycourses?|mycourselist|yxk(?:list)?|xkjg(?:list)?)$/.test(
+          token,
+        )
+      ) {
+        return true;
+      }
+      return token === 'my' && /^courses?$/.test(tokens[index + 1] || '');
+    });
+  }
+
+  function applyCourseSnapshot(courses, snapshot) {
+    if (!Array.isArray(courses) || !Array.isArray(snapshot)) return courses;
+    const seenIds = new Set(
+      snapshot.map((course) => course?.id).filter(Boolean),
+    );
+    const seenCodes = new Set(
+      snapshot.map((course) => course?.courseCode).filter(Boolean),
+    );
+    return courses.map((course) => {
+      if (seenIds.has(course.id)) return { ...course, stale: false };
+      if (course.courseCode && seenCodes.has(course.courseCode)) {
+        return { ...course, stale: true };
+      }
+      return course;
+    });
+  }
+
   const Core = {
     DAYS,
     TIME_TABLE,
@@ -754,6 +788,8 @@
     detectConflictIds,
     dedupeMeetings,
     mergeDisplayMeetings,
+    sourceLooksOfficial,
+    applyCourseSnapshot,
     normalizeText,
     stringValue,
   };
@@ -1025,7 +1061,7 @@
     }
 
     function parsePayload(payload, source) {
-      const officialHint = /(selected|mycourse|my-course|yxk|result)/i.test(source);
+      const officialHint = core.sourceLooksOfficial(source);
       const courses = core.extractCourses(payload, {
         source,
         officialHint,
@@ -1055,38 +1091,44 @@
 
       const originalOpen = XMLHttpRequest.prototype.open;
       const originalSend = XMLHttpRequest.prototype.send;
+      const listeningRequests = new WeakSet();
+      const requestUrls = new WeakMap();
       XMLHttpRequest.prototype.open = function open(method, url, ...rest) {
-        this.__seuPlannerUrl = String(url || '');
-        return originalOpen.call(this, method, url, ...rest);
+        requestUrls.set(this, String(url || ''));
+        return Reflect.apply(originalOpen, this, [method, url, ...rest]);
       };
       XMLHttpRequest.prototype.send = function send(...args) {
-        this.addEventListener('load', () => {
-          const url = this.responseURL || this.__seuPlannerUrl || '';
-          try {
-            if (this.responseType === 'json') {
-              parsePayload(this.response, url);
-              return;
+        if (!listeningRequests.has(this)) {
+          listeningRequests.add(this);
+          this.addEventListener('load', () => {
+            const url = this.responseURL || requestUrls.get(this) || '';
+            try {
+              if (this.responseType === 'json') {
+                parsePayload(this.response, url);
+                return;
+              }
+              if (this.responseType === '' || this.responseType === 'text') {
+                maybeParseResponseText(this.responseText, url);
+              }
+            } catch {
+              // A protected or unavailable response should not affect the site.
             }
-            if (this.responseType === '' || this.responseType === 'text') {
-              maybeParseResponseText(this.responseText, url);
-            }
-          } catch {
-            // A protected or unavailable response should not affect the site.
-          }
-        });
-        return originalSend.apply(this, args);
+          });
+        }
+        return Reflect.apply(originalSend, this, args);
       };
 
       const originalFetch = window.fetch;
       if (typeof originalFetch === 'function') {
-        window.fetch = function fetch(input, init) {
+        window.fetch = function fetch(...args) {
+          const input = args[0];
           const source =
             typeof input === 'string'
               ? input
               : input && typeof input.url === 'string'
                 ? input.url
                 : '';
-          return originalFetch.call(this, input, init).then((response) => {
+          return Reflect.apply(originalFetch, this, args).then((response) => {
             response
               .clone()
               .text()
@@ -1100,7 +1142,7 @@
 
     function scanVueData() {
       const app = document.getElementById('xsxkapp');
-      if (!app || !app.__vue__) return;
+      if (!app || !app.__vue__) return [];
       const vm = app.__vue__;
       const candidates = [];
 
@@ -1126,6 +1168,7 @@
         }),
       );
       if (courses.length > 0) queueCourses(courses, 'vue');
+      return courses;
     }
 
     function elementText(element) {
@@ -1338,7 +1381,7 @@
     }
 
     function injectCourseButtons() {
-      if (!state || !document.body) return;
+      if (!state || !document.body) return [];
       const candidates = [...document.querySelectorAll(CARD_SELECTOR)]
         .filter(isVisible)
         .slice(0, 1200);
@@ -1372,6 +1415,9 @@
 
       injectBesideChoiceButtons();
       installInjectedPointerHandler();
+      return [...document.querySelectorAll('.seu-planner-add')]
+        .map((button) => injectedCourseByButton.get(button))
+        .filter(Boolean);
     }
 
     function buttonAtPoint(clientX, clientY) {
@@ -1569,29 +1615,22 @@
 
     function refreshFromPage() {
       if (!state) return;
-      scanVueData();
-      injectCourseButtons();
-      const catalogIds = new Set(state.catalog.map((course) => course.id));
-      state.planned = state.planned.map((course) => ({
-        ...course,
-        stale: !catalogIds.has(course.id),
-      }));
+      const vueCourses = scanVueData();
+      const domCourses = injectCourseButtons();
+      const snapshotById = new Map();
+      [...vueCourses, ...domCourses].forEach((course) => {
+        if (course?.id) snapshotById.set(course.id, course);
+      });
+      const snapshot = [...snapshotById.values()];
+      state.planned = core.applyCourseSnapshot(state.planned, snapshot);
+      state.official = core.applyCourseSnapshot(state.official, snapshot);
       saveState();
       scheduleRender();
-      showToast('已重新扫描页面课程数据。');
-    }
-
-    function markStaleCourses() {
-      if (!state) return;
-      const catalogIds = new Set(state.catalog.map((course) => course.id));
-      state.planned = state.planned.map((course) => ({
-        ...course,
-        stale: !catalogIds.has(course.id),
-      }));
-      state.official = state.official.map((course) => ({
-        ...course,
-        stale: !catalogIds.has(course.id),
-      }));
+      showToast(
+        snapshot.length > 0
+          ? '已按当前页面重新校验课程数据。'
+          : '当前页面没有可用于校验的课程数据。',
+      );
     }
 
     function showToast(message) {
@@ -2202,7 +2241,9 @@
       });
       window.__SEU_COURSE_PLANNER__ = {
         core,
-        state,
+        get state() {
+          return state;
+        },
         addCourse,
         refreshFromPage,
       };

@@ -127,6 +127,12 @@
             hasShadow: Boolean(root),
             shadowHtmlLength: root?.innerHTML.length || 0,
             apiPresent: Boolean(window.__SEU_COURSE_PLANNER__),
+            apiStateIsDynamic: Boolean(
+              Object.getOwnPropertyDescriptor(
+                window.__SEU_COURSE_PLANNER__ || {},
+                'state'
+              )?.get
+            ),
             dragged: Boolean(planner?.style.left && planner?.style.top),
             buttonCount: document.querySelectorAll('.seu-planner-add').length,
             meetingCount: root?.querySelectorAll('.meeting').length || 0,
